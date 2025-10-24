@@ -1,0 +1,51 @@
+{
+    "callbackUrl": "http://localhost:8080/callback",
+    "backends":{
+        "s3":"some-random-key-against-s3-credentials-kvdb",
+        "gcs":"some-random-key-against-gcs-credentials-kvdb",
+        "azure":"some-random-key-against-azure-credentials-kvdb",
+        "ftp":"some-random-key-against-ftp-credentials-kvdb",
+        "http":"some-random-key-against-http-credentials-kvdb",
+        "directory":"some-random-key-against-directory-credentials-kvdb"
+    },
+    "transformers":{
+        "crop":"some-random-key-against-crop-settings-kvdb",
+        "rotate":"some-random-key-against-rotate-settings-kvdb",
+        "watermark":"some-random-key-against-watermark-settings-kvdb"
+    },
+    "resolutions":{
+        "original":{"width":0,"height":0},
+        "thumbnail":{"width":100,"height":75},
+        "large":{"width":800,"height":600},
+        "medium":{"width":400,"height":300},
+        "small":{"width":200,"height":150},
+        "icon":{"width":50,"height":50}
+    },
+
+    "conversionJobs":[
+        {
+         "type":"jpeg",
+         "resolutions":[ "large","medium","small" ],
+         "transformers":[ "crop","rotate" ],
+         "destinationBackends":["s3","gcs" ],
+         "keepOriginal":true,
+         "settings":{
+            "quality":80,
+            "effort":6,
+            "speed":4
+         }
+        },
+        {
+         "type":"webp",
+         "resolutions":[ "large","medium","small","thumbnail" ],
+         "transformers":[],
+         "destinationBackends":["directory","http" ],
+         "keepOriginal":true,
+         "settings":{
+            "quality":75,
+            "effort":5
+         }
+        }
+    ]
+
+}
