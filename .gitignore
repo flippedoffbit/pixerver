@@ -1,0 +1,48 @@
+# Binaries
+/bin/
+/dist/
+/*.exe
+/*.dll
+/*.so
+/*.dylib
+/*.out
+
+# Go build/test artifacts
+*.test
+coverage.out
+
+# Dependency directories
+/vendor/
+
+# Pebble / local data
+/data/
+data/
+*.db
+
+# Secrets and environment
+.env
+.env.*
+*.key
+*.pem
+*.crt
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.iml
+*.swp
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Misc
+coverage/
+
+# Ignore generated files (protobufs, etc.) if you generate them locally
+*_gen.go
+
+
+# Keep go.sum tracked (recommended) - do not ignore it
