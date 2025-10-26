@@ -44,7 +44,8 @@ coverage/
 # Ignore generated files (protobufs, etc.) if you generate them locally
 *_gen.go
 
-pixerver # compiled binary
+# compiled binaries
+pixerver
 
 
 # Keep go.sum tracked (recommended) - do not ignore it
