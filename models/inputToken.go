@@ -14,8 +14,9 @@ type ConversionJob struct {
 	Transformers        []string `json:"transformers"`
 	DestinationBackends []string `json:"destinationBackends"`
 	KeepOriginal        bool     `json:"keepOriginal"`
-	// Settings are intentionally a map[string]any to allow numeric or string values
-	// (quality: 80, effort: 6, etc.). Caller should assert types as needed.
+	// Settings is a map[string]string with values encoded as strings to match
+	// the expected Go types. Numeric values in JSON should be quoted so they
+	// unmarshal as strings (e.g. "quality": "80").
 	Settings map[string]string `json:"settings"`
 }
 

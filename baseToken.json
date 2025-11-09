@@ -29,11 +29,11 @@
          "transformers":[ "crop","rotate" ],
          "destinationBackends":["s3","gcs" ],
          "keepOriginal":true,
-         "settings":{
-            "quality":80,
-            "effort":6,
-            "speed":4
-         }
+          "settings":{
+              "quality":"80",
+              "effort":"6",
+              "speed":"4"
+          }
         },
         {
          "type":"webp",
@@ -41,10 +41,10 @@
          "transformers":[],
          "destinationBackends":["directory","http" ],
          "keepOriginal":true,
-         "settings":{
-            "quality":75,
-            "effort":5
-         }
+          "settings":{
+              "quality":"75",
+              "effort":"5"
+          }
         }
     ]
 

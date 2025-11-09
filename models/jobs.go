@@ -1,5 +1,9 @@
 package models
 
+import (
+	"github.com/google/uuid"
+)
+
 /*
 Job represents a job in the system.
 its split of conversion jobs from input tokens. so basically a job single unit of work
@@ -7,6 +11,7 @@ that the system processes. and jobs are just broken up combintions of resolution
 and types (we have not broken up destination backends as its pointless to rencode images just for writing them to different storage backends).
 */
 type Job struct {
+	ID                    string            `json:"id"`
 	Type                  string            `json:"type"`
 	Status                string            `json:"status"`
 	Settings              map[string]string `json:"settings"`
@@ -40,8 +45,8 @@ func (cjs ConversionJobs) ToJobMap(resMap map[string]Resolution) map[string][]Jo
 // ToJobs expands a single ConversionJob into one Job per resolution
 // (using the provided resMap to resolve resolution names). Unknown
 // resolutions are ignored. The returned Jobs have Status set to
-// "pending" and Settings are stringified from the ConversionJob's
-// Settings map.
+// "pending" and Settings are preserved as map[string]any; callers may
+// stringify values when passing to encoders.
 func (cj ConversionJob) ToJobs(resMap map[string]Resolution) []Job {
 	var out []Job
 	for _, rname := range cj.Resolutions {
@@ -52,6 +57,7 @@ func (cj ConversionJob) ToJobs(resMap map[string]Resolution) []Job {
 		}
 
 		job := Job{
+			ID:                    uuid.New().String(),
 			Type:                  cj.Type,
 			Status:                "pending",
 			Settings:              cj.Settings,
@@ -68,3 +74,5 @@ func (cj ConversionJob) ToJobs(resMap map[string]Resolution) []Job {
 	}
 	return out
 }
+
+// (Settings remain map[string]string; no helpers required.)
