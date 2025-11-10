@@ -1,77 +1,90 @@
 package pebblecore
 
 import (
+	"context"
+	"encoding/hex"
+	"time"
+
 	"pixerver/logger"
 
-	"github.com/cockroachdb/pebble"
+	"github.com/redis/go-redis/v9"
 )
 
-// Open opens (or creates) a Pebble DB at the provided path and returns the
-// *pebble.DB. Caller must call Close when finished.
-func Open(path string) (*pebble.DB, error) {
-	db, err := pebble.Open(path, &pebble.Options{})
-	if err != nil {
-		logger.Errorf("failed to open database %s: %v", path, err)
+// Open creates a Redis client. The path parameter is ignored for Redis;
+// configuration is read from environment variables or defaults.
+func Open(path string) (*redis.Client, error) {
+	// Default to localhost:6379; allow overrides through env in future.
+	opt := &redis.Options{
+		Addr:        "localhost:6379",
+		DialTimeout: 5 * time.Second,
+	}
+	client := redis.NewClient(opt)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		logger.Errorf("failed to open redis client: %v", err)
 		return nil, err
 	}
-	logger.Infof("opened pebble db at %s", path)
-	return db, nil
+	logger.Infof("connected to redis %s", opt.Addr)
+	return client, nil
 }
 
-// Close closes the database and logs any error returned.
-func Close(db *pebble.DB) error {
+// Close closes the Redis client.
+func Close(db *redis.Client) error {
 	if db == nil {
 		return nil
 	}
 	if err := db.Close(); err != nil {
-		logger.Errorf("error closing db: %v", err)
+		logger.Errorf("error closing redis client: %v", err)
 		return err
 	}
-	logger.Info("db closed")
+	logger.Info("redis client closed")
 	return nil
 }
 
-// AddEntry sets a key/value pair in the DB.
-func AddEntry(db *pebble.DB, key, value []byte) error {
+// AddEntry sets a key/value pair in Redis. The provided key is used as-is
+// (converted to a string via hex encoding) to avoid binary issues.
+func AddEntry(db *redis.Client, key, value []byte) error {
 	if db == nil {
-		return pebble.ErrClosed
+		return redis.ErrClosed
 	}
-	if err := db.Set(key, value, pebble.NoSync); err != nil {
-		logger.Errorf("set failed: %v", err)
+	k := hex.EncodeToString(key)
+	ctx := context.Background()
+	if err := db.Set(ctx, k, value, 0).Err(); err != nil {
+		logger.Errorf("redis set failed: %v", err)
 		return err
 	}
-	logger.Debugf("set key=%x", key)
+	logger.Debugf("set key=%s", k)
 	return nil
 }
 
 // GetEntry retrieves a value for the provided key.
-func GetEntry(db *pebble.DB, key []byte) ([]byte, error) {
+func GetEntry(db *redis.Client, key []byte) ([]byte, error) {
 	if db == nil {
-		return nil, pebble.ErrClosed
+		return nil, redis.ErrClosed
 	}
-	v, closer, err := db.Get(key)
+	k := hex.EncodeToString(key)
+	ctx := context.Background()
+	v, err := db.Get(ctx, k).Bytes()
 	if err != nil {
-		logger.Warnf("get key=%x: %v", key, err)
+		logger.Debugf("redis get key=%s: %v", k, err)
 		return nil, err
 	}
-	// pebble Get returns a slice referencing the DB. Make a copy to be safe.
-	val := append([]byte(nil), v...)
-	if closer != nil {
-		_ = closer.Close()
-	}
-	logger.Debugf("got key=%x len=%d", key, len(val))
-	return val, nil
+	logger.Debugf("got key=%s len=%d", k, len(v))
+	return append([]byte(nil), v...), nil
 }
 
-// DelEntry deletes a key from the DB.
-func DelEntry(db *pebble.DB, key []byte) error {
+// DelEntry deletes a key from Redis.
+func DelEntry(db *redis.Client, key []byte) error {
 	if db == nil {
-		return pebble.ErrClosed
+		return redis.ErrClosed
 	}
-	if err := db.Delete(key, pebble.NoSync); err != nil {
-		logger.Errorf("delete key=%x: %v", key, err)
+	k := hex.EncodeToString(key)
+	ctx := context.Background()
+	if err := db.Del(ctx, k).Err(); err != nil {
+		logger.Errorf("redis del key=%s: %v", k, err)
 		return err
 	}
-	logger.Debugf("deleted key=%x", key)
+	logger.Debugf("deleted key=%s", k)
 	return nil
 }

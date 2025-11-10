@@ -2,74 +2,60 @@ package tasks
 
 import (
 	"errors"
-	pebblecore "pixerver/pebble/core"
-
-	"github.com/cockroachdb/pebble"
+	"pixerver/store"
 )
 
 const (
-	TaskDbPath = "data/pebble.db"
+	TaskDbPath = "tasks:" // now interpreted as key prefix for store
 )
 
-var TaskDB *pebble.DB
+var TaskDB *store.Store
 
-// CreateDB creates and opens a Pebble DB at the specified path.
-func CreateDB() (*pebble.DB, error) {
+// CreateDB creates and opens the Store for tasks.
+func CreateDB() (*store.Store, error) {
 	var err error
-	TaskDB, err = pebblecore.Open(TaskDbPath)
+	TaskDB, err = store.New(TaskDbPath)
 	return TaskDB, err
 }
 
-// CloseDB closes the Pebble DB.
+// CloseDB closes the Store client.
 func CloseDB() error {
-	return pebblecore.Close(TaskDB)
+	return TaskDB.Close()
 }
 
-// AddTask adds a task to the Pebble DB.
-
+// AddTask adds a task to the Store.
 func AddTask(key, value []byte) error {
-	return pebblecore.AddEntry(TaskDB, key, value)
+	return TaskDB.Set(key, value)
 }
 
-// GetTask retrieves a task from the Pebble DB.
+// GetTask retrieves a task from the Store.
 func GetTask(key []byte) ([]byte, error) {
-	return pebblecore.GetEntry(TaskDB, key)
+	return TaskDB.Get(key)
 }
 
-// DelTask deletes a task from the Pebble DB.
+// DelTask deletes a task from the Store.
 func DelTask(key []byte) error {
-	return pebblecore.DelEntry(TaskDB, key)
+	return TaskDB.Del(key)
 }
 
-// TaskKV represents a key/value entry for a task stored in Pebble.
+// TaskKV represents a key/value entry for a task stored in Store.
 type TaskKV struct {
 	Key   []byte
 	Value []byte
 }
 
 // ListTasks returns all task key/value pairs stored in the TaskDB.
-// Caller receives copies of keys and values and can mutate them safely.
 func ListTasks() ([]TaskKV, error) {
 	if TaskDB == nil {
 		return nil, errors.New("task db not open")
 	}
-
-	it, err := TaskDB.NewIter(nil)
+	kvs, err := TaskDB.List()
 	if err != nil {
 		return nil, err
 	}
-	defer it.Close()
-
-	var out []TaskKV
-	for ok := it.First(); ok; ok = it.Next() {
-		// copy key and value so callers don't hold references to memmapped data
-		k := append([]byte(nil), it.Key()...)
-		v := append([]byte(nil), it.Value()...)
-		out = append(out, TaskKV{Key: k, Value: v})
-	}
-
-	if err := it.Error(); err != nil {
-		return nil, err
+	out := make([]TaskKV, 0, len(kvs))
+	for _, k := range kvs {
+		out = append(out, TaskKV{Key: k.Key, Value: k.Value})
 	}
 	return out, nil
 }
