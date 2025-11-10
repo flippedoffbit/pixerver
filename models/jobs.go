@@ -1,7 +1,7 @@
 package models
 
 import (
-	"github.com/google/uuid"
+	"pixerver/internal/uuidv7"
 )
 
 /*
@@ -26,18 +26,22 @@ type Job struct {
 // processes.
 type ConversionJobs []ConversionJob
 
-// ToJobMap converts a slice of ConversionJob into a map keyed by
-// conversion type. The resMap parameter is expected to contain the
-// named resolutions referenced by each ConversionJob (e.g. "large",
+// ToJobMap converts a slice of ConversionJob into a map keyed by Job.ID.
+// Using the job ID as the key ensures that jobs with the same Type
+// (including cloned/duplicate types) are preserved individually and
+// not collapsed together. The resMap parameter is expected to contain
+// the named resolutions referenced by each ConversionJob (e.g. "large",
 // "thumbnail"). Jobs referencing an unknown resolution are skipped.
-func (cjs ConversionJobs) ToJobMap(resMap map[string]Resolution) map[string][]Job {
-	out := make(map[string][]Job)
+func (cjs ConversionJobs) ToJobMap(resMap map[string]Resolution) map[string]Job {
+	out := make(map[string]Job)
 	for _, cj := range cjs {
 		jobs := cj.ToJobs(resMap)
 		if len(jobs) == 0 {
 			continue
 		}
-		out[cj.Type] = append(out[cj.Type], jobs...)
+		for _, j := range jobs {
+			out[j.ID] = j
+		}
 	}
 	return out
 }
@@ -57,7 +61,7 @@ func (cj ConversionJob) ToJobs(resMap map[string]Resolution) []Job {
 		}
 
 		job := Job{
-			ID:                    uuid.New().String(),
+			ID:                    uuidv7.New(),
 			Type:                  cj.Type,
 			Status:                "pending",
 			Settings:              cj.Settings,
