@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"time"
 
+	"pixerver/internal/redisclient"
 	"pixerver/logger"
 
 	"github.com/redis/go-redis/v9"
@@ -22,13 +22,10 @@ type Store struct {
 // New creates a Store that will namespace keys with the provided prefix.
 // Example: prefix="tasks:" will store values with keys like "tasks:<hex>".
 func New(prefix string) (*Store, error) {
-	// Simple default Redis options; can be extended later to read env vars.
-	opt := &redis.Options{Addr: "localhost:6379", DialTimeout: 5 * time.Second}
-	client := redis.NewClient(opt)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		logger.Errorf("store: redis ping failed: %v", err)
+	// Create a redis client using environment-aware helper. This keeps
+	// configuration in one place (REDIS_ADDR, REDIS_PASSWORD, REDIS_DB).
+	client, err := redisclient.NewClient()
+	if err != nil {
 		return nil, err
 	}
 	s := &Store{client: client, prefix: prefix}
