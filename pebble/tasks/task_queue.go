@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"errors"
 	"time"
 
 	"pixerver/logger"
@@ -86,9 +87,4 @@ func Reclaim(minIdle time.Duration, count int) ([]TaskMessage, error) {
 }
 
 // ErrQueueNotOpen is returned when the queue client hasn't been created.
-var ErrQueueNotOpen = &QueueError{"queue not open"}
-
-// QueueError is a small error type for queue helpers.
-type QueueError struct{ Msg string }
-
-func (e *QueueError) Error() string { return e.Msg }
+var ErrQueueNotOpen = errors.New("queue not open")
