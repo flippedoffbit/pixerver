@@ -59,6 +59,13 @@ type Config struct {
 	Info         LevelOptions
 	Warn         LevelOptions
 	Error        LevelOptions
+	// File, if set, will be appended to and included in outputs when
+	// multi-writer behavior is requested.
+	File string
+	// Stdout when true includes stdout in all level outputs via MultiWriter.
+	Stdout bool
+	// ErrorToStderr when true ensures Error level also writes to stderr.
+	ErrorToStderr bool
 }
 
 // LevelOptions configures a single log level.
@@ -74,6 +81,7 @@ type Logger struct {
 	mu       sync.RWMutex
 	levels   map[Level]*levelState
 	colorize bool
+	closers  []io.Closer
 }
 
 type levelState struct {
@@ -89,9 +97,61 @@ var std = New(Config{})
 func New(cfg Config) *Logger {
 	cfg = cfg.withDefaults()
 
+	// if File is set, attempt to open it for append and include it in
+	// per-level multiwriters. Keep the file open for the lifetime of the
+	// logger and record it for Close().
+	var fileHandle *os.File
+	if cfg.File != "" {
+		f, err := os.OpenFile(cfg.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err == nil {
+			fileHandle = f
+		} else {
+			// fallback: log to stderr if file can't be opened
+			fmt.Fprintf(os.Stderr, "logger: failed to open file %s: %v\n", cfg.File, err)
+		}
+	}
+
+	// helper to build a writer for a level
+	buildWriter := func(level Level, base io.Writer) io.Writer {
+		var writers []io.Writer
+		// include stdout if requested
+		if cfg.Stdout {
+			writers = append(writers, os.Stdout)
+		}
+		// include file if opened
+		if fileHandle != nil {
+			writers = append(writers, fileHandle)
+		}
+		// include stderr for errors if requested
+		if level == LevelError && cfg.ErrorToStderr {
+			writers = append(writers, os.Stderr)
+		}
+		// always include the base writer last
+		if base != nil {
+			writers = append(writers, base)
+		}
+		if len(writers) == 0 {
+			return base
+		}
+		if len(writers) == 1 {
+			return writers[0]
+		}
+		return io.MultiWriter(writers...)
+	}
+
+	// apply multiwriter choices to level options before constructing levelState
+	cfg.Debug.Writer = buildWriter(LevelDebug, cfg.Debug.Writer)
+	cfg.Info.Writer = buildWriter(LevelInfo, cfg.Info.Writer)
+	cfg.Warn.Writer = buildWriter(LevelWarn, cfg.Warn.Writer)
+	cfg.Error.Writer = buildWriter(LevelError, cfg.Error.Writer)
+
 	l := &Logger{
 		levels:   make(map[Level]*levelState, 4),
 		colorize: !cfg.DisableColor,
+	}
+	if fileHandle != nil {
+		// record file handle to close later
+		l.closers = append(l.closers, fileHandle)
 	}
 
 	l.levels[LevelDebug] = newLevelState(LevelDebug, cfg.Debug, l.colorize)
@@ -100,6 +160,20 @@ func New(cfg Config) *Logger {
 	l.levels[LevelError] = newLevelState(LevelError, cfg.Error, l.colorize)
 
 	return l
+}
+
+// Close releases any resources held by the Logger (e.g. file handles).
+func (l *Logger) Close() error {
+	if l == nil {
+		return nil
+	}
+	var firstErr error
+	for _, c := range l.closers {
+		if err := c.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 // Init replaces the package logger with one built from cfg.

@@ -12,6 +12,7 @@ and types (we have not broken up destination backends as its pointless to rencod
 */
 type Job struct {
 	ID                    string            `json:"id"`
+	SourceFileName        string            `json:"sourceFileName"`
 	Type                  string            `json:"type"`
 	Status                string            `json:"status"`
 	Settings              map[string]string `json:"settings"`
@@ -26,57 +27,39 @@ type Job struct {
 // processes.
 type ConversionJobs []ConversionJob
 
-// ToJobMap converts a slice of ConversionJob into a map keyed by Job.ID.
-// Using the job ID as the key ensures that jobs with the same Type
-// (including cloned/duplicate types) are preserved individually and
-// not collapsed together. The resMap parameter is expected to contain
-// the named resolutions referenced by each ConversionJob (e.g. "large",
-// "thumbnail"). Jobs referencing an unknown resolution are skipped.
-func (cjs ConversionJobs) ToJobMap(resMap map[string]Resolution) map[string]Job {
-	out := make(map[string]Job)
-	for _, cj := range cjs {
-		jobs := cj.ToJobs(resMap)
-		if len(jobs) == 0 {
-			continue
-		}
-		for _, j := range jobs {
-			out[j.ID] = j
-		}
-	}
-	return out
-}
-
-// ToJobs expands a single ConversionJob into one Job per resolution
-// (using the provided resMap to resolve resolution names). Unknown
-// resolutions are ignored. The returned Jobs have Status set to
-// "pending" and Settings are preserved as map[string]any; callers may
-// stringify values when passing to encoders.
-func (cj ConversionJob) ToJobs(resMap map[string]Resolution) []Job {
+// ToJobList converts a slice of ConversionJob into a flat slice of Job.
+// Each ConversionJob may expand into multiple Jobs (one per resolution).
+// The resMap parameter is used to look up resolution names; unknown
+// resolutions are skipped. The returned slice is a plain list — callers
+// can rely on Job.ID for uniqueness.
+// ToJobs converts a slice of ConversionJob into a flat slice of Job. This
+// keeps the API consistent with ConversionJob.ToJobs and provides a simple
+// flat list of jobs where each job has its own ID.
+func (cjs ConversionJobs) ToJobs(resMap map[string]Resolution) []Job {
 	var out []Job
-	for _, rname := range cj.Resolutions {
-		res, ok := resMap[rname]
-		if !ok {
-			// skip unknown resolution names
-			continue
-		}
+	for _, cj := range cjs {
+		for _, rname := range cj.Resolutions {
+			res, ok := resMap[rname]
+			if !ok {
+				continue
+			}
 
-		job := Job{
-			ID:                    uuidv7.New(),
-			Type:                  cj.Type,
-			Status:                "pending",
-			Settings:              cj.Settings,
-			TransformerID:         "",
-			Resolution:            res,
-			DestinationBackendIDs: cj.DestinationBackends,
-		}
+			job := Job{
+				ID:                    uuidv7.New(),
+				Type:                  cj.Type,
+				Status:                "pending",
+				Settings:              cj.Settings,
+				TransformerID:         "",
+				Resolution:            res,
+				DestinationBackendIDs: cj.DestinationBackends,
+			}
 
-		if len(cj.Transformers) > 0 {
-			job.TransformerID = cj.Transformers[0]
-		}
+			if len(cj.Transformers) > 0 {
+				job.TransformerID = cj.Transformers[0]
+			}
 
-		out = append(out, job)
+			out = append(out, job)
+		}
 	}
 	return out
 }
-
-// (Settings remain map[string]string; no helpers required.)

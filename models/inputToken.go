@@ -1,10 +1,8 @@
 package models
 
 import (
-	"encoding/json"
 	"errors"
 	"net/url"
-	"os"
 )
 
 // ConversionJob describes a single conversion to perform.
@@ -33,19 +31,6 @@ type InputToken struct {
 	Transformers   map[string]string     `json:"transformers"`
 	Resolutions    map[string]Resolution `json:"resolutions"`
 	ConversionJobs []ConversionJob       `json:"conversionJobs"`
-}
-
-// LoadInputTokenFromFile parses the JSON file at path into an InputToken.
-func LoadInputTokenFromFile(path string) (*InputToken, error) {
-	f, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var t InputToken
-	if err := json.Unmarshal(f, &t); err != nil {
-		return nil, err
-	}
-	return &t, nil
 }
 
 // Validate performs basic sanity checks on the token.
