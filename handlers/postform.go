@@ -4,15 +4,25 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
+	"pixerver/internal/auth"
 	"pixerver/internal/uuidv7"
 	"pixerver/logger"
+)
+
+var (
+	postFormValidatorMu     sync.RWMutex
+	postFormValidator       *auth.Validator
+	postFormValidatorErr    error
+	postFormValidatorLoaded bool
 )
 
 // PostFormHandler handles multipart file uploads from the form field "file".
@@ -21,6 +31,26 @@ import (
 func PostFormHandler(w http.ResponseWriter, r *http.Request) {
 	// limit request body size to 100MB to avoid OOM from huge uploads
 	r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
+
+	validator, err := getPostFormValidator()
+	if err != nil {
+		http.Error(w, "server configuration error", http.StatusInternalServerError)
+		logger.Errorf("postform: jwt validator init failed: %v", err)
+		return
+	}
+
+	token, err := extractBearerToken(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		logger.Warnf("postform: %v", err)
+		return
+	}
+
+	if _, err := validator.Validate(token); err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		logger.Warnf("postform: jwt validation failed: %v", err)
+		return
+	}
 
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)
@@ -94,4 +124,62 @@ func PostFormHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]string{"filename": finalName, "path": finalPath}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func extractBearerToken(r *http.Request) (string, error) {
+	const prefix = "Bearer "
+	authz := r.Header.Get("Authorization")
+	if authz == "" {
+		return "", errors.New("missing Authorization header")
+	}
+	if !strings.HasPrefix(authz, prefix) {
+		return "", errors.New("invalid Authorization header")
+	}
+	token := strings.TrimSpace(authz[len(prefix):])
+	if token == "" {
+		return "", errors.New("empty bearer token")
+	}
+	return token, nil
+}
+
+func getPostFormValidator() (*auth.Validator, error) {
+	postFormValidatorMu.RLock()
+	if postFormValidatorLoaded {
+		v := postFormValidator
+		err := postFormValidatorErr
+		postFormValidatorMu.RUnlock()
+		return v, err
+	}
+	postFormValidatorMu.RUnlock()
+
+	postFormValidatorMu.Lock()
+	defer postFormValidatorMu.Unlock()
+	if postFormValidatorLoaded {
+		return postFormValidator, postFormValidatorErr
+	}
+	cfg := auth.Config{
+		Secret:   os.Getenv("POSTFORM_JWT_SECRET"),
+		Audience: os.Getenv("POSTFORM_JWT_AUDIENCE"),
+		Issuer:   os.Getenv("POSTFORM_JWT_ISSUER"),
+	}
+	postFormValidatorLoaded = true
+	postFormValidator, postFormValidatorErr = auth.NewValidator(cfg)
+	return postFormValidator, postFormValidatorErr
+}
+
+// test helpers (no-op in production codepath, but used by unit tests)
+func setPostFormValidatorForTest(v *auth.Validator) {
+	postFormValidatorMu.Lock()
+	defer postFormValidatorMu.Unlock()
+	postFormValidator = v
+	postFormValidatorErr = nil
+	postFormValidatorLoaded = true
+}
+
+func resetPostFormValidatorForTest() {
+	postFormValidatorMu.Lock()
+	defer postFormValidatorMu.Unlock()
+	postFormValidator = nil
+	postFormValidatorErr = nil
+	postFormValidatorLoaded = false
 }

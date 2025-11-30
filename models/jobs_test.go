@@ -41,7 +41,7 @@ func TestConversionJobs_ToJobs(t *testing.T) {
 	}
 
 	cjs := ConversionJobs(parsed.ConversionJobs)
-	jobs := cjs.ToJobs(parsed.Resolutions)
+	jobs := cjs.ToJobs(parsed.Resolutions, "sourcefile.png")
 
 	if len(jobs) != 2 {
 		t.Fatalf("expected 2 jobs, got %d", len(jobs))
@@ -59,6 +59,9 @@ func TestConversionJobs_ToJobs(t *testing.T) {
 
 	// common checks
 	for i, j := range jobs {
+		if j.SourceFileName == "" {
+			t.Fatalf("job %d: expected source filename to be generated", i)
+		}
 		if j.Type != "jpeg" {
 			t.Fatalf("job %d: unexpected type %s", i, j.Type)
 		}

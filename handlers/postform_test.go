@@ -6,14 +6,23 @@ import (
 	"encoding/json"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+
+	"pixerver/internal/auth"
 )
 
 func TestPostFormHandler(t *testing.T) {
+	secret := setupTestValidator(t)
+	token := mustMakeToken(t, secret)
+
 	// create temp dir and chdir so uploads/ is local to temp
 	dir := t.TempDir()
 	cwd, _ := os.Getwd()
@@ -35,6 +44,7 @@ func TestPostFormHandler(t *testing.T) {
 
 	req := httptest.NewRequest("POST", "/upload", &b)
 	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 
 	PostFormHandler(rec, req)
@@ -73,4 +83,46 @@ func TestPostFormHandler(t *testing.T) {
 	if string(dec) != "test" {
 		t.Fatalf("decoded base32 mismatch: %s", string(dec))
 	}
+}
+
+func TestPostFormHandlerUnauthorized(t *testing.T) {
+	setupTestValidator(t)
+
+	req := httptest.NewRequest("POST", "/upload", nil)
+	rec := httptest.NewRecorder()
+
+	PostFormHandler(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 got %d", rec.Code)
+	}
+}
+
+func setupTestValidator(t *testing.T) string {
+	t.Helper()
+	secret := "unit-test-secret"
+	v, err := auth.NewValidator(auth.Config{Secret: secret})
+	if err != nil {
+		t.Fatalf("NewValidator: %v", err)
+	}
+	setPostFormValidatorForTest(v)
+	t.Cleanup(func() {
+		resetPostFormValidatorForTest()
+	})
+	return secret
+}
+
+func mustMakeToken(t *testing.T, secret string) string {
+	t.Helper()
+	claims := jwt.RegisteredClaims{
+		Subject:   "tester",
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := tok.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("SignedString: %v", err)
+	}
+	return signed
 }

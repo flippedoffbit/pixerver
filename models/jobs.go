@@ -1,6 +1,8 @@
 package models
 
 import (
+	"fmt"
+
 	"pixerver/internal/uuidv7"
 )
 
@@ -35,7 +37,7 @@ type ConversionJobs []ConversionJob
 // ToJobs converts a slice of ConversionJob into a flat slice of Job. This
 // keeps the API consistent with ConversionJob.ToJobs and provides a simple
 // flat list of jobs where each job has its own ID.
-func (cjs ConversionJobs) ToJobs(resMap map[string]Resolution) []Job {
+func (cjs ConversionJobs) ToJobs(resMap map[string]Resolution, sourceFileName string) []Job {
 	var out []Job
 	for _, cj := range cjs {
 		for _, rname := range cj.Resolutions {
@@ -44,8 +46,11 @@ func (cjs ConversionJobs) ToJobs(resMap map[string]Resolution) []Job {
 				continue
 			}
 
+			id := uuidv7.New()
+
 			job := Job{
-				ID:                    uuidv7.New(),
+				ID:                    id,
+				SourceFileName:        sourceFileName,
 				Type:                  cj.Type,
 				Status:                "pending",
 				Settings:              cj.Settings,
@@ -62,4 +67,11 @@ func (cjs ConversionJobs) ToJobs(resMap map[string]Resolution) []Job {
 		}
 	}
 	return out
+}
+
+func generateSourceFileName(jobID, jobType string, res Resolution) string {
+	if res.Width > 0 || res.Height > 0 {
+		return fmt.Sprintf("%s_%dx%d.%s", jobID, res.Width, res.Height, jobType)
+	}
+	return fmt.Sprintf("%s.%s", jobID, jobType)
 }
