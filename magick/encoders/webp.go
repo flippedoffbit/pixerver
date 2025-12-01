@@ -2,12 +2,7 @@ package encoders
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
-
-	"pixerver/logger"
 )
 
 // HandleWEBP creates a WebP variant from input file. It writes a new file
@@ -36,49 +31,15 @@ func HandleWEBP(name string, settings map[string]string) error {
 		}
 	}
 
-	// reuse JPEG flow by setting format to webp and appropriate defines
-	s := make(map[string]string)
-	for k, v := range settings {
-		s[k] = v
-	}
-	s["format"] = "webp"
-	// pass webp-specific defines via settings so HandleJPEG will append them
-	// We'll construct a -define string via settings to be appended by HandleJPEG
-	// However, HandleJPEG currently doesn't process arbitrary defines, so
-	// instead we call ImageMagick directly here mirroring HandleJPEG behavior.
-
 	// find binary
-	bin, err := exec.LookPath("magick")
+	bin, err := findImageMagickBinary()
 	if err != nil {
-		bin, err = exec.LookPath("convert")
-		if err != nil {
-			return fmt.Errorf("image magick not found: %w", err)
-		}
+		return err
 	}
 
 	// prepare output name
-	ext := "webp"
-	base := name
-	if e := filepath.Ext(name); e != "" {
-		base = name[:len(name)-len(e)]
-	}
-	width := 0
-	height := 0
-	if w, ok := settings["width"]; ok {
-		if v, err := strconv.Atoi(w); err == nil {
-			width = v
-		}
-	}
-	if h, ok := settings["height"]; ok {
-		if v, err := strconv.Atoi(h); err == nil {
-			height = v
-		}
-	}
-	sizeSuffix := "orig"
-	if width != 0 || height != 0 {
-		sizeSuffix = fmt.Sprintf("%d_%d", width, height)
-	}
-	outName := filepath.Join(filepath.Dir(name), fmt.Sprintf("%s_%s.%s", filepath.Base(base), sizeSuffix, ext))
+	width, height := parseResolution(settings)
+	outName := buildOutputPath(name, "webp", width, height)
 	tmp := outName + ".tmp"
 
 	var args []string
@@ -95,22 +56,5 @@ func HandleWEBP(name string, settings map[string]string) error {
 	}
 	args = append(args, tmp)
 
-	cmd := exec.Command(bin, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.Errorf("webp conversion failed: %v output=%s", err, string(out))
-		_ = os.Remove(tmp)
-		return fmt.Errorf("webp conversion failed: %v: %s", err, string(out))
-	}
-
-	if st, err := os.Stat(name); err == nil {
-		_ = os.Chmod(tmp, st.Mode())
-	}
-	if err := os.Rename(tmp, outName); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("failed to move webp output into place: %v", err)
-	}
-
-	logger.Debugf("webp created: %s", outName)
-	return nil
+	return execImageMagick(bin, args, tmp, outName, name, "webp")
 }

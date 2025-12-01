@@ -20,7 +20,7 @@ import (
 )
 
 func TestPostFormHandler(t *testing.T) {
-	secret := setupTestValidator(t)
+	srv, secret := setupTestValidator(t)
 	token := mustMakeToken(t, secret)
 
 	// create temp dir and chdir so uploads/ is local to temp
@@ -47,7 +47,7 @@ func TestPostFormHandler(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 
-	PostFormHandler(rec, req)
+	srv.PostFormHandler(rec, req)
 
 	if rec.Code != 200 {
 		t.Fatalf("expected 200 got %d body=%s", rec.Code, rec.Body.String())
@@ -86,30 +86,27 @@ func TestPostFormHandler(t *testing.T) {
 }
 
 func TestPostFormHandlerUnauthorized(t *testing.T) {
-	setupTestValidator(t)
+	srv, _ := setupTestValidator(t)
 
 	req := httptest.NewRequest("POST", "/upload", nil)
 	rec := httptest.NewRecorder()
 
-	PostFormHandler(rec, req)
+	srv.PostFormHandler(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 got %d", rec.Code)
 	}
 }
 
-func setupTestValidator(t *testing.T) string {
+func setupTestValidator(t *testing.T) (*Server, string) {
 	t.Helper()
 	secret := "unit-test-secret"
 	v, err := auth.NewValidator(auth.Config{Secret: secret})
 	if err != nil {
 		t.Fatalf("NewValidator: %v", err)
 	}
-	setPostFormValidatorForTest(v)
-	t.Cleanup(func() {
-		resetPostFormValidatorForTest()
-	})
-	return secret
+	s := NewServer(v, "uploads")
+	return s, secret
 }
 
 func mustMakeToken(t *testing.T, secret string) string {

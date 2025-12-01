@@ -3,8 +3,6 @@ package encoders
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 
 	"pixerver/logger"
@@ -49,12 +47,9 @@ func HandleJPEG(name string, settings map[string]string) error {
 	logger.Debugf("jpeg encoder: file=%s quality=%d progressive=%v strip=%v optimize=%v", name, quality, progressive, strip, optimize)
 
 	// find ImageMagick binary (magick v7) or fallback to convert
-	bin, err := exec.LookPath("magick")
+	bin, err := findImageMagickBinary()
 	if err != nil {
-		bin, err = exec.LookPath("convert")
-		if err != nil {
-			return fmt.Errorf("image magick not found (tried 'magick' and 'convert'): %w", err)
-		}
+		return err
 	}
 
 	// determine output format and target filename
@@ -64,31 +59,9 @@ func HandleJPEG(name string, settings map[string]string) error {
 	}
 
 	// parse width/height from settings if provided
-	width := 0
-	height := 0
-	if w, ok := settings["width"]; ok {
-		if v, err := strconv.Atoi(w); err == nil {
-			width = v
-		}
-	}
-	if h, ok := settings["height"]; ok {
-		if v, err := strconv.Atoi(h); err == nil {
-			height = v
-		}
-	}
+	width, height := parseResolution(settings)
 
-	base := name
-	ext := filepath.Ext(name)
-	if ext != "" {
-		base = name[:len(name)-len(ext)]
-	}
-
-	sizeSuffix := "orig"
-	if width != 0 || height != 0 {
-		sizeSuffix = fmt.Sprintf("%d_%d", width, height)
-	}
-
-	outName := filepath.Join(filepath.Dir(name), fmt.Sprintf("%s_%s.%s", filepath.Base(base), sizeSuffix, outExt))
+	outName := buildOutputPath(name, outExt, width, height)
 	tmp := outName + ".tmp"
 
 	// build args: [input ...options... output]
@@ -115,36 +88,27 @@ func HandleJPEG(name string, settings map[string]string) error {
 
 	args = append(args, tmp)
 
-	cmd := exec.Command(bin, args...)
-	// run and capture output for debugging
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.Errorf("magick failed: %v output=%s", err, string(out))
-		// cleanup tmp if exists
-		_ = os.Remove(tmp)
-		return fmt.Errorf("magick command failed: %v: %s", err, string(out))
+	// use execImageMagick but then rename to original name (JPEG replaces in-place)
+	if err := execImageMagick(bin, args, tmp, outName, name, outExt); err != nil {
+		return err
 	}
 
-	// preserve file mode
-	st, err := os.Stat(name)
-	if err == nil {
-		_ = os.Chmod(tmp, st.Mode())
-	}
-
-	// replace original
-	if err := os.Rename(tmp, name); err != nil {
-		// attempt copy-on-fail fallback
-		logger.Warnf("rename tmp -> original failed: %v, attempting copy fallback", err)
-		in, rerr := os.ReadFile(tmp)
-		if rerr == nil {
-			werr := os.WriteFile(name, in, 0o644)
-			_ = os.Remove(tmp)
-			if werr != nil {
-				return fmt.Errorf("failed to replace original file: %v", werr)
+	// JPEG encoder replaces original file, so rename outName to original name
+	if outName != name {
+		if err := os.Rename(outName, name); err != nil {
+			// attempt copy-on-fail fallback
+			logger.Warnf("rename tmp -> original failed: %v, attempting copy fallback", err)
+			in, rerr := os.ReadFile(outName)
+			if rerr == nil {
+				werr := os.WriteFile(name, in, 0o644)
+				_ = os.Remove(outName)
+				if werr != nil {
+					return fmt.Errorf("failed to replace original file: %v", werr)
+				}
+				return nil
 			}
-			return nil
+			return fmt.Errorf("failed to replace original file: %v", err)
 		}
-		return fmt.Errorf("failed to replace original file: %v", err)
 	}
 
 	logger.Debugf("jpeg encoding completed for %s", name)

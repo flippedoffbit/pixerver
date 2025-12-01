@@ -1,8 +1,11 @@
 package main
 
 import (
+	"net/http"
 	"os"
 
+	"pixerver/handlers"
+	"pixerver/internal/auth"
 	"pixerver/internal/env"
 	"pixerver/logger"
 )
@@ -28,4 +31,18 @@ func main() {
 	logger.Info("info message: application running")
 	logger.Warn("warn message: demo warning")
 	logger.Error("error message: demo error")
+
+	// Wire up PostFormHandler if POSTFORM_JWT_SECRET is present.
+	// This keeps main non-fatal if env isn't present (demo mode).
+	if v, err := auth.NewValidatorFromEnv("POSTFORM_JWT_SECRET", "POSTFORM_JWT_AUDIENCE", "POSTFORM_JWT_ISSUER"); err == nil {
+		uploadDir := os.Getenv("POSTFORM_UPLOAD_DIR")
+		if uploadDir == "" {
+			uploadDir = "uploads"
+		}
+		srv := handlers.NewServer(v, uploadDir)
+		http.HandleFunc("/upload", srv.PostFormHandler)
+		logger.Infof("postform handler registered at /upload, uploads -> %s", uploadDir)
+	} else {
+		logger.Warnf("postform: validator not configured from env: %v", err)
+	}
 }

@@ -2,12 +2,7 @@ package encoders
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
-
-	"pixerver/logger"
 )
 
 // HandleAVIF creates an AVIF variant from input file. It writes a new file
@@ -31,37 +26,14 @@ func HandleAVIF(name string, settings map[string]string) error {
 	}
 
 	// find binary
-	bin, err := exec.LookPath("magick")
+	bin, err := findImageMagickBinary()
 	if err != nil {
-		bin, err = exec.LookPath("convert")
-		if err != nil {
-			return fmt.Errorf("image magick not found: %w", err)
-		}
+		return err
 	}
 
 	// prepare output name
-	ext := "avif"
-	base := name
-	if e := filepath.Ext(name); e != "" {
-		base = name[:len(name)-len(e)]
-	}
-	width := 0
-	height := 0
-	if w, ok := settings["width"]; ok {
-		if v, err := strconv.Atoi(w); err == nil {
-			width = v
-		}
-	}
-	if h, ok := settings["height"]; ok {
-		if v, err := strconv.Atoi(h); err == nil {
-			height = v
-		}
-	}
-	sizeSuffix := "orig"
-	if width != 0 || height != 0 {
-		sizeSuffix = fmt.Sprintf("%d_%d", width, height)
-	}
-	outName := filepath.Join(filepath.Dir(name), fmt.Sprintf("%s_%s.%s", filepath.Base(base), sizeSuffix, ext))
+	width, height := parseResolution(settings)
+	outName := buildOutputPath(name, "avif", width, height)
 	tmp := outName + ".tmp"
 
 	var args []string
@@ -76,22 +48,5 @@ func HandleAVIF(name string, settings map[string]string) error {
 	}
 	args = append(args, tmp)
 
-	cmd := exec.Command(bin, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		logger.Errorf("avif conversion failed: %v output=%s", err, string(out))
-		_ = os.Remove(tmp)
-		return fmt.Errorf("avif conversion failed: %v: %s", err, string(out))
-	}
-
-	if st, err := os.Stat(name); err == nil {
-		_ = os.Chmod(tmp, st.Mode())
-	}
-	if err := os.Rename(tmp, outName); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("failed to move avif output into place: %v", err)
-	}
-
-	logger.Debugf("avif created: %s", outName)
-	return nil
+	return execImageMagick(bin, args, tmp, outName, name, "avif")
 }
