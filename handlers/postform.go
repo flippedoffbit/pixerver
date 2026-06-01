@@ -56,8 +56,28 @@ func (s *Server) PostFormHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.Infof("postform: stored upload as %s", finalPath)
 
-	// Respond with JSON containing the stored filename
+	resp := map[string]interface{}{"filename": finalName, "path": finalPath}
+	if token, ok, err := s.inputTokenFromRequest(r); err != nil {
+		http.Error(w, "invalid input token", http.StatusBadRequest)
+		logger.Warnf("postform: invalid input token: %v", err)
+		return
+	} else if ok {
+		processor := s.Processor
+		if processor.OutputDir == "" {
+			processor.OutputDir = s.processedDir()
+		}
+		if processor.HTTPClient == nil {
+			processor.HTTPClient = s.HTTPClient
+		}
+		result, err := processor.Process(r.Context(), token, finalPath)
+		if err != nil {
+			http.Error(w, "processing failed", http.StatusInternalServerError)
+			logger.Errorf("postform: processing failed: %v", err)
+			return
+		}
+		resp["processing"] = result
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	resp := map[string]string{"filename": finalName, "path": finalPath}
 	_ = json.NewEncoder(w).Encode(resp)
 }

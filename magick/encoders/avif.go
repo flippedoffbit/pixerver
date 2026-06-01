@@ -34,17 +34,15 @@ func HandleAVIF(name string, settings map[string]string) error {
 	// prepare output name
 	width, height := parseResolution(settings)
 	outName := buildOutputPath(name, "avif", width, height)
-	tmp := outName + ".tmp"
+	tmp := buildTempOutputPath(outName)
 
 	var args []string
 	args = append(args, name)
+	args = appendCommonArgs(args, mapWithout(settings, "quality", "effort"))
 	// image magick avif options - we'll set quality and effort if present
 	args = append(args, "-quality", strconv.Itoa(quality))
 	if effort >= 0 {
 		args = append(args, "-define", fmt.Sprintf("avif:effort=%d", effort))
-	}
-	if width != 0 || height != 0 {
-		args = append(args, "-resize", fmt.Sprintf("%dx%d", width, height))
 	}
 	args = append(args, tmp)
 

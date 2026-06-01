@@ -40,19 +40,17 @@ func HandleWEBP(name string, settings map[string]string) error {
 	// prepare output name
 	width, height := parseResolution(settings)
 	outName := buildOutputPath(name, "webp", width, height)
-	tmp := outName + ".tmp"
+	tmp := buildTempOutputPath(outName)
 
 	var args []string
 	args = append(args, name)
+	args = appendCommonArgs(args, mapWithout(settings, "quality", "lossless", "method"))
 	if lossless {
 		args = append(args, "-define", "webp:lossless=true")
 	}
 	args = append(args, "-quality", strconv.Itoa(quality))
 	if method >= 0 {
 		args = append(args, "-define", fmt.Sprintf("webp:method=%d", method))
-	}
-	if width != 0 || height != 0 {
-		args = append(args, "-resize", fmt.Sprintf("%dx%d", width, height))
 	}
 	args = append(args, tmp)
 

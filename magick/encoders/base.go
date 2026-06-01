@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"pixerver/logger"
 )
@@ -50,6 +51,77 @@ func buildOutputPath(inputName string, ext string, width, height int) string {
 	}
 
 	return filepath.Join(filepath.Dir(inputName), fmt.Sprintf("%s_%s.%s", filepath.Base(base), sizeSuffix, ext))
+}
+
+func buildTempOutputPath(finalPath string) string {
+	ext := filepath.Ext(finalPath)
+	base := strings.TrimSuffix(finalPath, ext)
+	if ext == "" {
+		return finalPath + ".tmp"
+	}
+	return base + ".tmp" + ext
+}
+
+func appendCommonArgs(args []string, settings map[string]string) []string {
+	strip := true
+	if s, ok := settings["strip"]; ok && (s == "false" || s == "0") {
+		strip = false
+	}
+	if strip {
+		args = append(args, "-strip")
+	}
+
+	if q, ok := settings["quality"]; ok && q != "" {
+		if v, err := strconv.Atoi(q); err == nil && v >= 0 && v <= 100 {
+			args = append(args, "-quality", strconv.Itoa(v))
+		} else {
+			logger.Warnf("invalid quality %q, skipping", q)
+		}
+	}
+
+	width, height := parseResolution(settings)
+	args = appendResizeArgs(args, settings, width, height)
+
+	if settings["flatten"] == "true" || settings["flatten"] == "1" {
+		if bg := settings["background"]; bg != "" {
+			args = append(args, "-background", bg)
+		}
+		args = append(args, "-flatten")
+	}
+
+	return args
+}
+
+func appendResizeArgs(args []string, settings map[string]string, width, height int) []string {
+	if width == 0 && height == 0 {
+		return args
+	}
+	resizeArg := fmt.Sprintf("%dx%d", width, height)
+	if settings["ignoreAspect"] == "true" || settings["ignoreAspect"] == "1" {
+		resizeArg += "!"
+	} else if settings["resizeMode"] == "fill" {
+		resizeArg += "^"
+	}
+	args = append(args, "-resize", resizeArg)
+	if settings["resizeMode"] == "fill" {
+		args = append(args, "-gravity", "center", "-extent", fmt.Sprintf("%dx%d", width, height))
+	}
+	return args
+}
+
+func mapWithout(settings map[string]string, keys ...string) map[string]string {
+	out := make(map[string]string, len(settings))
+	skip := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		skip[key] = struct{}{}
+	}
+	for key, value := range settings {
+		if _, ok := skip[key]; ok {
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 // execImageMagick runs ImageMagick with given args and handles temp file cleanup.

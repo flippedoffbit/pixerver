@@ -1,12 +1,13 @@
 {
     "callbackUrl": "http://localhost:8080/callback",
     "backends":{
-        "s3":"some-random-key-against-s3-credentials-kvdb",
-        "gcs":"some-random-key-against-gcs-credentials-kvdb",
-        "azure":"some-random-key-against-azure-credentials-kvdb",
-        "ftp":"some-random-key-against-ftp-credentials-kvdb",
-        "http":"some-random-key-against-http-credentials-kvdb",
-        "directory":"some-random-key-against-directory-credentials-kvdb"
+        "s3":"s3-originals",
+        "s3:public":"s3-public",
+        "gcs":"gcs-archive",
+        "azure":"azure-backup",
+        "ftp":"ftp-partner",
+        "http":"http-webhook",
+        "directory":"directory-local"
     },
     "transformers":{
         "crop":"some-random-key-against-crop-settings-kvdb",
@@ -39,11 +40,33 @@
          "type":"webp",
          "resolutions":[ "large","medium","small","thumbnail" ],
          "transformers":[],
-         "destinationBackends":["directory","http" ],
+         "destinationBackends":["directory","s3:public","http" ],
          "keepOriginal":true,
           "settings":{
               "quality":"75",
               "effort":"5"
+          }
+        },
+        {
+         "type":"avif",
+         "resolutions":[ "large","medium","small" ],
+         "transformers":[],
+         "destinationBackends":["s3:public" ],
+         "keepOriginal":false,
+          "settings":{
+              "quality":"55",
+              "effort":"6"
+          }
+        },
+        {
+         "type":"png",
+         "resolutions":[ "thumbnail","icon" ],
+         "transformers":[],
+         "destinationBackends":["directory" ],
+         "keepOriginal":false,
+          "settings":{
+              "compressionLevel":"9",
+              "strip":"true"
           }
         }
     ]

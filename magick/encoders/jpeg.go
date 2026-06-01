@@ -1,23 +1,21 @@
 package encoders
 
 import (
-	"fmt"
-	"os"
 	"strconv"
 
 	"pixerver/logger"
 )
 
 // HandleJPEG handles JPEG encoding using ImageMagick CLI.
-// name is the path to the input file (will be replaced in-place).
+// name is the path to the input file.
 // settings may contain:
 //   - "quality" : integer JPEG quality (0-100)
 //   - "progressive" : "true"/"false" (use progressive/interlace)
 //   - "strip" : "true"/"false" (strip metadata)
 //   - "optimize" : "true"/"false" (try to enable jpeg optimization)
 //
-// The function writes a temporary output file then atomically replaces
-// the original file when successful.
+// The function writes a temporary output file then atomically moves it into
+// place next to the input.
 func HandleJPEG(name string, settings map[string]string) error {
 	// defaults
 	quality := 80
@@ -62,16 +60,14 @@ func HandleJPEG(name string, settings map[string]string) error {
 	width, height := parseResolution(settings)
 
 	outName := buildOutputPath(name, outExt, width, height)
-	tmp := outName + ".tmp"
+	tmp := buildTempOutputPath(outName)
 
 	// build args: [input ...options... output]
 	var args []string
 	// when using 'magick' the binary takes input then options then output;
 	// when using 'convert' it's the same layout.
 	args = append(args, name)
-	if strip {
-		args = append(args, "-strip")
-	}
+	args = appendCommonArgs(args, mapWithout(settings, "quality", "width", "height", "resizeMode", "ignoreAspect"))
 	args = append(args, "-quality", strconv.Itoa(quality))
 	if progressive {
 		// use Plane which is progressive JPEG
@@ -80,35 +76,12 @@ func HandleJPEG(name string, settings map[string]string) error {
 	if optimize {
 		args = append(args, "-define", "jpeg:optimize-coding=true")
 	}
-	// if resize specified, add resize option (encoder handles efficient resize)
-	if width != 0 || height != 0 {
-		resizeArg := fmt.Sprintf("%dx%d", width, height)
-		args = append(args, "-resize", resizeArg)
-	}
+	args = appendResizeArgs(args, settings, width, height)
 
 	args = append(args, tmp)
 
-	// use execImageMagick but then rename to original name (JPEG replaces in-place)
 	if err := execImageMagick(bin, args, tmp, outName, name, outExt); err != nil {
 		return err
-	}
-
-	// JPEG encoder replaces original file, so rename outName to original name
-	if outName != name {
-		if err := os.Rename(outName, name); err != nil {
-			// attempt copy-on-fail fallback
-			logger.Warnf("rename tmp -> original failed: %v, attempting copy fallback", err)
-			in, rerr := os.ReadFile(outName)
-			if rerr == nil {
-				werr := os.WriteFile(name, in, 0o644)
-				_ = os.Remove(outName)
-				if werr != nil {
-					return fmt.Errorf("failed to replace original file: %v", werr)
-				}
-				return nil
-			}
-			return fmt.Errorf("failed to replace original file: %v", err)
-		}
 	}
 
 	logger.Debugf("jpeg encoding completed for %s", name)

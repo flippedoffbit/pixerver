@@ -85,6 +85,52 @@ func TestPostFormHandler(t *testing.T) {
 	}
 }
 
+func TestPostFormHandlerProcessesToken(t *testing.T) {
+	srv, secret := setupTestValidator(t)
+	token := mustMakeToken(t, secret)
+
+	dir := t.TempDir()
+	srv.UploadDir = filepath.Join(dir, "uploads")
+	srv.Processor.OutputDir = filepath.Join(dir, "processed")
+	srv.Processor.Encoder = func(input, typ string, settings map[string]string) (string, error) {
+		out := input + ".webp"
+		return out, os.WriteFile(out, []byte("encoded"), 0o644)
+	}
+
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
+	fw, err := w.CreateFormFile("file", "test.png")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := io.Copy(fw, strings.NewReader("dummycontent")); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
+	inputToken := `{"callbackUrl":"http://127.0.0.1:1/callback","backends":{"directory":"` + filepath.Join(dir, "public") + `"},"resolutions":{"small":{"width":12,"height":9}},"conversionJobs":[{"type":"webp","resolutions":["small"],"destinationBackends":["directory"]}]}`
+	if err := w.WriteField("token", inputToken); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+	w.Close()
+
+	req := httptest.NewRequest("POST", "/upload", &b)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+
+	srv.PostFormHandler(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected 200 got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if _, ok := resp["processing"]; !ok {
+		t.Fatalf("expected processing result in response")
+	}
+}
+
 func TestPostFormHandlerUnauthorized(t *testing.T) {
 	srv, _ := setupTestValidator(t)
 
