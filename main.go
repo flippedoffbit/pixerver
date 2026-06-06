@@ -1,16 +1,21 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"pixerver/handlers"
 	"pixerver/internal/auth"
 	"pixerver/internal/env"
+	"pixerver/internal/uuidv7"
 	"pixerver/logger"
 	"pixerver/pipeline"
+	"pixerver/queue"
+	"pixerver/uploads"
 )
 
 func main() {
@@ -64,7 +69,26 @@ func main() {
 			HTTPClient:      srv.HTTPClient,
 			BackendResolver: resolver,
 		}
+		uploadRepo, uploadQueue, queueErr := setupUploadQueue()
+		if queueErr != nil {
+			logger.Warnf("upload queue unavailable: %v", queueErr)
+		} else {
+			signer, signerErr := uploads.NewCallbackSignerFromEnv()
+			if signerErr != nil {
+				logger.Warnf("callback jwt signer unavailable: %v", signerErr)
+			}
+			srv.Uploads = &uploads.Service{
+				Repo:        uploadRepo,
+				Queue:       uploadQueue,
+				Processor:   srv.Processor,
+				MaxAttempts: envInt("PIXERVER_JOB_MAX_ATTEMPTS", 3),
+				Signer:      signer,
+			}
+			startWorkers(context.Background(), srv.Uploads, uploadQueue, envInt("PIXERVER_WORKER_COUNT", 1))
+			logger.Infof("upload queue enabled")
+		}
 		http.HandleFunc("/upload", srv.PostFormHandler)
+		http.HandleFunc("/uploads/", srv.UploadStatusHandler)
 		logger.Infof("postform handler registered at /upload, uploads -> %s, processed -> %s", uploadDir, outputDir)
 		if tokenPath != "" {
 			logger.Infof("postform default token path -> %s", tokenPath)
@@ -90,4 +114,55 @@ func main() {
 		logger.Errorf("server stopped: %v", err)
 		os.Exit(1)
 	}
+}
+
+func setupUploadQueue() (*uploads.RedisRepository, *queue.Queue, error) {
+	repo, err := uploads.NewRedisRepository()
+	if err != nil {
+		return nil, nil, err
+	}
+	stream := os.Getenv("PIXERVER_QUEUE_STREAM")
+	if stream == "" {
+		stream = "pixerver:jobs"
+	}
+	group := os.Getenv("PIXERVER_QUEUE_GROUP")
+	if group == "" {
+		group = "pixerver-workers"
+	}
+	q, err := queue.New(stream, group, workerConsumer())
+	if err != nil {
+		_ = repo.Close()
+		return nil, nil, err
+	}
+	return repo, q, nil
+}
+
+func startWorkers(ctx context.Context, service *uploads.Service, q *queue.Queue, count int) {
+	if count < 1 {
+		count = 1
+	}
+	for i := 0; i < count; i++ {
+		worker := uploads.Worker{Service: service, Queue: q}
+		go worker.Run(ctx)
+	}
+}
+
+func workerConsumer() string {
+	if v := os.Getenv("PIXERVER_WORKER_CONSUMER"); v != "" {
+		return v
+	}
+	host, err := os.Hostname()
+	if err == nil && host != "" {
+		return host + "-" + strconv.Itoa(os.Getpid())
+	}
+	return uuidv7.New()
+}
+
+func envInt(name string, fallback int) int {
+	if raw := os.Getenv(name); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil {
+			return v
+		}
+	}
+	return fallback
 }

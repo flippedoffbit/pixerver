@@ -61,3 +61,22 @@ func TestStoreSetGetListDel(t *testing.T) {
 		t.Log("REDIS_ADDR not set locally - tests used the default environment")
 	}
 }
+
+func TestStoreSetGetString(t *testing.T) {
+	s, err := New("test:store:string:")
+	if err != nil {
+		t.Skipf("redis not available: %v", err)
+	}
+	defer s.Close()
+
+	if err := s.SetString("upload-1", []byte("queued")); err != nil {
+		t.Fatalf("SetString failed: %v", err)
+	}
+	got, err := s.GetString("upload-1")
+	if err != nil {
+		t.Fatalf("GetString failed: %v", err)
+	}
+	if string(got) != "queued" {
+		t.Fatalf("GetString = %q", got)
+	}
+}

@@ -32,6 +32,11 @@ func (s *Server) PostFormHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Warnf("postform: jwt validation failed: %v", err)
 		return
 	}
+	if s.Uploads == nil {
+		http.Error(w, "upload queue unavailable", http.StatusServiceUnavailable)
+		logger.Errorf("postform: upload queue unavailable")
+		return
+	}
 
 	if err := r.ParseMultipartForm(s.MaxMemory); err != nil {
 		http.Error(w, "invalid multipart form", http.StatusBadRequest)
@@ -56,28 +61,23 @@ func (s *Server) PostFormHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.Infof("postform: stored upload as %s", finalPath)
 
-	resp := map[string]interface{}{"filename": finalName, "path": finalPath}
 	if token, ok, err := s.inputTokenFromRequest(r); err != nil {
 		http.Error(w, "invalid input token", http.StatusBadRequest)
 		logger.Warnf("postform: invalid input token: %v", err)
 		return
 	} else if ok {
-		processor := s.Processor
-		if processor.OutputDir == "" {
-			processor.OutputDir = s.processedDir()
-		}
-		if processor.HTTPClient == nil {
-			processor.HTTPClient = s.HTTPClient
-		}
-		result, err := processor.Process(r.Context(), token, finalPath)
+		resp, err := s.Uploads.CreateUpload(r.Context(), finalName, finalPath, token)
 		if err != nil {
-			http.Error(w, "processing failed", http.StatusInternalServerError)
-			logger.Errorf("postform: processing failed: %v", err)
+			http.Error(w, "queue upload failed", http.StatusInternalServerError)
+			logger.Errorf("postform: queue upload failed: %v", err)
 			return
 		}
-		resp["processing"] = result
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(resp)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	http.Error(w, "input token required", http.StatusBadRequest)
+	logger.Warnf("postform: input token missing")
 }

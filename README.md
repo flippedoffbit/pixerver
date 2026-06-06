@@ -2,8 +2,9 @@
 
 Pixerver is a token-driven image processing service. A client uploads an image
 and supplies an input token. Pixerver stores the upload, expands the token into
-conversion jobs, creates image variants with ImageMagick, writes artifacts to
-configured backends, and posts a callback with the result.
+conversion jobs, queues those jobs, creates image variants with ImageMagick in
+background workers, writes artifacts to configured backends, and posts a signed
+callback with the result.
 
 ## Current Flow
 
@@ -13,9 +14,16 @@ POST /upload
   -> save multipart file
   -> read token from multipart field or baseToken.json
   -> expand conversionJobs by resolution
-  -> encode variants
-  -> write each artifact to destinationBackends
-  -> POST callbackUrl with artifact metadata
+  -> persist upload/job records in Redis
+  -> enqueue each concrete job
+  -> respond 202 with uploadId and job list
+
+background worker
+  -> read queued job
+  -> encode variant
+  -> write artifact to destinationBackends
+  -> update job/upload state
+  -> POST callbackUrl with Authorization: Bearer <jwt>
 ```
 
 ## Run Locally
@@ -24,6 +32,7 @@ ImageMagick must be installed and available as either `magick` or `convert`.
 
 ```sh
 export POSTFORM_JWT_SECRET=change-me
+export PIXERVER_CALLBACK_JWT_SECRET=callback-change-me
 export REDIS_ADDR=localhost:6379
 go run .
 ```
@@ -32,11 +41,13 @@ Defaults:
 
 - HTTP address: `:8080`
 - Upload endpoint: `/upload`
+- Upload polling endpoint: `/uploads/{uploadId}`
 - Health endpoint: `/healthz`
 - Upload directory: `uploads`
 - Processed directory: `uploads/processed`
 - Default token path: `baseToken.json` when present
 - Backend config Redis prefix: `backend-configs:`
+- Queue stream/group: `pixerver:jobs` / `pixerver-workers`
 
 Useful env vars:
 
@@ -46,6 +57,15 @@ POSTFORM_UPLOAD_DIR=uploads
 PIXERVER_OUTPUT_DIR=uploads/processed
 PIXERVER_TOKEN_PATH=baseToken.json
 PIXERVER_BACKEND_CONFIG_PREFIX=backend-configs:
+PIXERVER_QUEUE_STREAM=pixerver:jobs
+PIXERVER_QUEUE_GROUP=pixerver-workers
+PIXERVER_WORKER_CONSUMER=
+PIXERVER_WORKER_COUNT=1
+PIXERVER_JOB_MAX_ATTEMPTS=3
+PIXERVER_CALLBACK_JWT_SECRET=callback-change-me
+PIXERVER_CALLBACK_JWT_ISSUER=pixerver
+PIXERVER_CALLBACK_JWT_AUDIENCE=
+PIXERVER_CALLBACK_JWT_TTL=5m
 POSTFORM_JWT_SECRET=change-me
 POSTFORM_JWT_AUDIENCE=
 POSTFORM_JWT_ISSUER=
@@ -65,8 +85,19 @@ Authorization:
 Authorization: Bearer <jwt>
 ```
 
-The response contains the stored source filename/path and, when a token is
-available, processing artifacts.
+The response is `202 Accepted` and contains the stored source filename/path,
+the `uploadId`, and the concrete queued jobs. If Redis queue/state is not
+available, uploads return `503 Service Unavailable`.
+
+Poll upload state with:
+
+```http
+GET /uploads/{uploadId}
+Authorization: Bearer <jwt>
+```
+
+The polling response includes upload status, job state, artifacts, callback
+status, and errors.
 
 ## Input Token
 

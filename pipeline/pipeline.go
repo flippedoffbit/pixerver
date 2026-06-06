@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -96,7 +97,7 @@ func (p Processor) Process(ctx context.Context, token *models.InputToken, source
 				Location:  location,
 				Width:     job.Resolution.Width,
 				Height:    job.Resolution.Height,
-				Settings:  cloneSettings(settings),
+				Settings:  maps.Clone(settings),
 				SourceJob: filepath.Base(artifactPath),
 			})
 		}
@@ -108,13 +109,68 @@ func (p Processor) Process(ctx context.Context, token *models.InputToken, source
 	return result, nil
 }
 
+// ProcessJob encodes and stores one concrete job. It is used by queue workers;
+// Process remains as the synchronous upload-level compatibility wrapper.
+func (p Processor) ProcessJob(ctx context.Context, token *models.InputToken, sourcePath string, job models.Job) ([]Artifact, error) {
+	if err := token.Validate(); err != nil {
+		return nil, err
+	}
+	if sourcePath == "" {
+		return nil, errors.New("source path is required")
+	}
+	if _, err := os.Stat(sourcePath); err != nil {
+		return nil, fmt.Errorf("source file unavailable: %w", err)
+	}
+
+	outputDir := p.OutputDir
+	if outputDir == "" {
+		outputDir = filepath.Join(filepath.Dir(sourcePath), "processed")
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create output dir: %w", err)
+	}
+
+	encoder := p.Encoder
+	if encoder == nil {
+		encoder = encoders.Encode
+	}
+
+	artifactPath, settings, err := p.encodeJob(outputDir, sourcePath, job, encoder)
+	if err != nil {
+		return nil, fmt.Errorf("job %s encode failed: %w", job.ID, err)
+	}
+
+	artifacts := make([]Artifact, 0, len(job.DestinationBackendIDs))
+	for _, backendID := range job.DestinationBackendIDs {
+		location, status, err := p.storeArtifact(ctx, token, backendID, artifactPath)
+		if err != nil {
+			return artifacts, fmt.Errorf("job %s backend %s failed: %w", job.ID, backendID, err)
+		}
+		artifacts = append(artifacts, Artifact{
+			JobID:     job.ID,
+			Type:      job.Type,
+			Backend:   backendID,
+			Status:    status,
+			Location:  location,
+			Width:     job.Resolution.Width,
+			Height:    job.Resolution.Height,
+			Settings:  maps.Clone(settings),
+			SourceJob: filepath.Base(artifactPath),
+		})
+	}
+	return artifacts, nil
+}
+
 func (p Processor) encodeJob(outputDir, sourcePath string, job models.Job, encoder EncoderFunc) (string, map[string]string, error) {
 	workPath := filepath.Join(outputDir, fmt.Sprintf("%s%s", job.ID, filepath.Ext(sourcePath)))
 	if err := copyFile(sourcePath, workPath); err != nil {
 		return "", nil, err
 	}
 
-	settings := cloneSettings(job.Settings)
+	settings := maps.Clone(job.Settings)
+	if settings == nil {
+		settings = make(map[string]string)
+	}
 	if job.Resolution.Width > 0 {
 		settings["width"] = fmt.Sprintf("%d", job.Resolution.Width)
 	}
@@ -238,23 +294,31 @@ func (p Processor) storeHTTP(ctx context.Context, target, artifactPath string) (
 }
 
 func (p Processor) sendCallback(ctx context.Context, callbackURL string, result Result) error {
+	return SendCallback(ctx, p.HTTPClient, callbackURL, result, "")
+}
+
+// SendCallback posts callback JSON and optionally attaches a bearer token.
+// Delivery is best-effort for network and non-2xx failures.
+func SendCallback(ctx context.Context, client *http.Client, callbackURL string, payload interface{}, bearerToken string) error {
 	if callbackURL == "" {
 		return nil
 	}
 	if _, err := url.ParseRequestURI(callbackURL); err != nil {
 		return fmt.Errorf("invalid callback URL: %w", err)
 	}
-	payload, err := json.Marshal(result)
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callbackURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, callbackURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+bearerToken)
+	}
 
-	client := p.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -376,14 +440,6 @@ func copyFile(src, dst string) error {
 		_ = os.Chmod(dst, st.Mode())
 	}
 	return nil
-}
-
-func cloneSettings(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in)+2)
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
 }
 
 func sameFilePath(a, b string) bool {

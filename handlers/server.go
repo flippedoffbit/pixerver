@@ -5,6 +5,7 @@ import (
 
 	"pixerver/internal/auth"
 	"pixerver/pipeline"
+	"pixerver/uploads"
 )
 
 // Server holds dependencies and configuration for HTTP handlers.
@@ -24,6 +25,8 @@ type Server struct {
 	Processor pipeline.Processor
 	// HTTPClient is shared by pipeline backends and callbacks.
 	HTTPClient *http.Client
+	// Uploads creates and reads queued upload jobs.
+	Uploads *uploads.Service
 }
 
 // NewServer creates a Server with sane defaults. UploadDir may be

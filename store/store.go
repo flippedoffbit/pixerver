@@ -59,6 +59,23 @@ func (s *Store) Set(key, value []byte) error {
 	return nil
 }
 
+// SetString stores a value by a readable string key. The final Redis key is
+// prefix + key, unlike Set which hex-encodes binary keys.
+func (s *Store) SetString(key string, value []byte) error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("store: client not initialized")
+	}
+	redisKey := s.prefix + key
+	ctx := context.Background()
+	if err := s.client.Set(ctx, redisKey, value, 0).Err(); err != nil {
+		return err
+	}
+	if err := s.client.SAdd(ctx, s.idxKey, key).Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Get retrieves a previously stored value.
 func (s *Store) Get(key []byte) ([]byte, error) {
 	if s == nil || s.client == nil {
@@ -66,6 +83,20 @@ func (s *Store) Get(key []byte) ([]byte, error) {
 	}
 	hexk := hex.EncodeToString(key)
 	redisKey := s.prefix + hexk
+	ctx := context.Background()
+	b, err := s.client.Get(ctx, redisKey).Bytes()
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), b...), nil
+}
+
+// GetString retrieves a value stored with SetString.
+func (s *Store) GetString(key string) ([]byte, error) {
+	if s == nil || s.client == nil {
+		return nil, fmt.Errorf("store: client not initialized")
+	}
+	redisKey := s.prefix + key
 	ctx := context.Background()
 	b, err := s.client.Get(ctx, redisKey).Bytes()
 	if err != nil {
